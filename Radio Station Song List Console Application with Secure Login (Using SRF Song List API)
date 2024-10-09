@@ -1,0 +1,158 @@
+import csv
+import os
+import requests
+import re
+import bcrypt
+from getpass import getpass
+
+CSV_FILE = '12320548.csv'
+API_KEY = 'https://www.freepublicapis.com/api/random'
+BASE_URL = "https://www.freepublicapis.com/api/random"
+
+def load_user_data():
+    users = {}
+    try:
+        with open(CSV_FILE, mode='r') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                users[row['email']] = {
+                    'password': row['password'],
+                    'security_ques': row['security_ques'],
+                    'security_ans': row['security_ans']
+                }
+    except FileNotFoundError:
+        print("No user data found. Please register.")
+    return users
+
+
+def register_user():
+    email = input("Enter your email: ")
+    while not validate_email(email):
+        print("Invalid email format. Please try again.")
+        email = input("Enter your email: ")
+
+    password = input("Enter your password: ")
+    while not validate_password(password):
+        print("Password does not meet criteria. Please try again.")
+        password = input("Enter your password: ")
+
+    hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    security_ques = input("Set a security question: ")
+    security_ans = input("Answer to the security question: ")
+
+    file_exists = os.path.isfile(CSV_FILE)
+    
+    with open(CSV_FILE, mode='a', newline='') as file:  
+        writer = csv.DictWriter(file, fieldnames=['email', 'password', 'security_ques', 'security_ans'])
+        if not file_exists:
+            writer.writeheader() 
+        
+        writer.writerow({
+            'email': email,
+            'password': hashed_password,
+            'security_ques': security_ques,
+            'security_ans': security_ans
+        })
+    
+    print("User registered successfully!")
+
+
+def validate_email(email):
+    return re.match(r'^[^@]+@[^@]+\.[^@]+$', email) is not None
+
+
+def validate_password(password):
+    if (len(password) >= 8 and
+            re.search(r'[A-Z]', password) and
+            re.search(r'[a-z]', password) and
+            re.search(r'[0-9]', password) and
+            re.search(r'[!@#$%^&*(),.?":{}|<>]', password)):
+        return True
+    return False
+
+
+def reset_password(users):
+    email = input("Enter your registered email: ")
+    if email in users:
+        answer = input(f"Answer security question: {users[email]['security_ques']}: ")
+        if answer == users[email]['security_ans']:
+            new_password = input("Enter new password: ")
+            while not validate_password(new_password):
+                print("Password does not meet criteria. Please try again.")
+                new_password = input("Enter new password: ")
+
+            hashed_password = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+
+            users[email]['password'] = hashed_password
+            update_csv(users)
+            print("Password reset successful!")
+        else:
+            print("Incorrect answer!")
+    else:
+        print("Email not found!")
+
+
+def update_csv(users):
+    with open(CSV_FILE, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['email', 'password', 'security_ques', 'security_ans'])
+        for email, data in users.items():
+            writer.writerow([email, data['password'], data['security_ques'], data['security_ans']])
+
+
+def login(users, max_attempts=5):
+    attempts = 0
+    while attempts < max_attempts:
+        email = input("Enter email: ")
+        password = getpass("Enter password: ")
+
+        if email in users and bcrypt.checkpw(password.encode(), users[email]['password'].encode()):
+            print("Login successful!")
+            return True, email
+        else:
+            attempts += 1
+            print(f"Invalid credentials. {max_attempts - attempts} attempts left.")
+    
+    print("Too many failed attempts. Exiting.")
+    return False, None
+
+
+def fetch_playlist():
+    response = requests.get(BASE_URL, headers={'Authorization': f'Bearer {API_KEY}'})
+    
+    if response.status_code == 200:
+        data = response.json()
+        print("Current Playlist:")
+        for item in data['songlist']:
+            print(f"Title: {item['title']}, Artist: {item['artist']}, Start Time: {item['start_time']}, End Time: {item['end_time']}")
+    else:
+        print("Failed to retrieve playlist.")
+
+
+def main():
+    users = load_user_data() 
+    
+    while True:
+        print("1. Register\n2. Login\n3. Forgot Password\n4. Exit")
+        choice = input("Choose an option: ")
+        
+        if choice == '1':
+            register_user()
+            users = load_user_data()  
+        elif choice == '2':
+            is_logged_in, email = login(users)
+            if is_logged_in:
+                print("Fetching current playlist from SRF Song List API...")
+                fetch_playlist()
+        elif choice == '3':
+            reset_password(users)
+        elif choice == '4':
+            print("Exiting...")
+            break
+        else:
+            print("Invalid choice! Please try again.")
+
+
+if __name__ == "__main__":
+    main()
